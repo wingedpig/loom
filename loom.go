@@ -1,5 +1,5 @@
 /*
-Package loom implements a set of functions to streamline the use of SSH for application deployment or system administration.
+Package loom implements a set of functions to interact with remote servers using SSH.
 It is based on the Python fabric library.
 */
 package loom
