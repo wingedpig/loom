@@ -416,13 +416,8 @@ func (config *Config) Local(cmd string) (string, error) {
 	if config.DisplayOutput == true {
 		fmt.Printf("local: %s\n", cmd)
 	}
-	fields := strings.Split(cmd, " ")
 	var command *exec.Cmd
-	if len(fields) == 1 {
-		command = exec.Command(fields[0])
-	} else {
-		command = exec.Command(fields[0], fields[1:]...)
-	}
+	command = exec.Command("/bin/sh", "-c", cmd)
 	var out bytes.Buffer
 	command.Stdout = &out
 	err := command.Run()
