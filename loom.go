@@ -47,12 +47,12 @@ func parsekey(file string) (ssh.Signer, error) {
 	var private ssh.Signer
 	privateBytes, err := ioutil.ReadFile(file)
 	if err != nil {
-		return private, err
+		return nil, err
 	}
 
 	private, err = ssh.ParsePrivateKey(privateBytes)
 	if err != nil {
-		return private, nil
+		return nil, err
 	}
 	return private, nil
 }
