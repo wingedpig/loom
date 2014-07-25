@@ -152,9 +152,10 @@ func (config *Config) doRun(cmd string, sudo bool) (string, error) {
 	// TODO: use pipes instead of CombinedOutput so that we can show the output of commands more interactively, instead
 	// of now, which is after they're completely done executing.
 	output, err := session.CombinedOutput(cmd)
+	soutput := strings.Replace(string(output), "\r\n", "\n", -1)
 	if err != nil {
-		if config.DisplayOutput == true && len(output) > 0 {
-			fmt.Printf("%s", string(output))
+		if config.DisplayOutput == true && len(soutput) > 0 {
+			fmt.Printf("%s", soutput)
 		}
 		if config.AbortOnError == true {
 			log.Fatalf("%s", err)
@@ -163,9 +164,9 @@ func (config *Config) doRun(cmd string, sudo bool) (string, error) {
 	}
 	session.SendRequest("close", false, nil)
 	if config.DisplayOutput == true {
-		fmt.Printf("%s", string(output))
+		fmt.Printf("%s", soutput)
 	}
-	return string(output), nil
+	return soutput, nil
 }
 
 // Run takes a command and runs it on the remote host, using ssh.
