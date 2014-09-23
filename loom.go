@@ -77,15 +77,11 @@ func (config *Config) connect() (*ssh.Session, error) {
 		sshconfig.Auth = append(sshconfig.Auth, ssh.Password(config.Password))
 	}
 
-	// By default, we try to include ~/.ssh/id_rsa. It is not an error if this file
-	// doesn't exist.
-	keyfile := os.Getenv("HOME") + "/.ssh/id_rsa"
-	pkey, err := parsekey(keyfile)
-	if err == nil {
-		sshconfig.Auth = append(sshconfig.Auth, ssh.PublicKeys(pkey))
-	}
+	var pkey ssh.Signer
+	var keyfile string
+	var err error
 
-	// Include any additional key files
+	// Include additional key files
 	for _, keyfile = range config.KeyFiles {
 		pkey, err = parsekey(keyfile)
 		if err != nil {
@@ -94,6 +90,14 @@ func (config *Config) connect() (*ssh.Session, error) {
 			}
 			return nil, err
 		}
+		sshconfig.Auth = append(sshconfig.Auth, ssh.PublicKeys(pkey))
+	}
+
+	// By default, we try to include ~/.ssh/id_rsa. It is not an error if this file
+	// doesn't exist.
+	keyfile = os.Getenv("HOME") + "/.ssh/id_rsa"
+	pkey, err = parsekey(keyfile)
+	if err == nil {
 		sshconfig.Auth = append(sshconfig.Auth, ssh.PublicKeys(pkey))
 	}
 
