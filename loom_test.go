@@ -51,3 +51,61 @@ func Test_Run(t *testing.T) {
 		t.Errorf("Text mismatch, expected '%s', got '%s'", testText, verifyText)
 	}
 }
+
+func TestInjectSudoPasswordIfNecessary(t *testing.T) {
+	config := Config{
+		User:          "user",
+		Password:      "user",
+		Host:          "127.0.0.1:22",
+		DisplayOutput: true,
+		AbortOnError:  false,
+	}
+
+	val, err := config.Sudo("ls -l")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(val)
+}
+
+func TestEnsureSudoMatcherShouldMatch(t *testing.T) {
+	totalPayload := `Command 1
+	[sudo] password for user:
+	Command2`
+
+	sm := newSudoMatcher("user")
+
+	match := sm.Match([]byte(totalPayload))
+	if !match {
+		t.Errorf("Expected a match")
+	}
+}
+
+func TestEnsureSudoMatcherShouldNotMatch(t *testing.T) {
+	totalPayload := `some othercommand
+	foo
+	bar`
+
+	sm := newSudoMatcher("user")
+
+	match := sm.Match([]byte(totalPayload))
+	if match {
+		t.Errorf("No match was expected")
+	}
+}
+
+func TestEnsureSudoMatcherShouldMatchAfterMultipleMatchTries(t *testing.T) {
+	sm := newSudoMatcher("user")
+
+	match := sm.Match([]byte(`Command 1
+	[sudo] password`))
+	if match {
+		t.Errorf("Expected no match")
+	}
+
+	match = sm.Match([]byte(` for user:`))
+	if !match {
+		t.Errorf("Expected a match")
+	}
+}

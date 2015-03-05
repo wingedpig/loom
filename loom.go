@@ -6,7 +6,9 @@ package loom
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"code.google.com/p/go.crypto/ssh"
 )
@@ -98,6 +101,7 @@ func (config *Config) connect() (*ssh.Session, error) {
 	keyfile = os.Getenv("HOME") + "/.ssh/id_rsa"
 	pkey, err = parsekey(keyfile)
 	if err == nil {
+		fmt.Println("Adding default rsa key")
 		sshconfig.Auth = append(sshconfig.Auth, ssh.PublicKeys(pkey))
 	}
 
@@ -155,7 +159,7 @@ func (config *Config) doRun(cmd string, sudo bool) (string, error) {
 
 	// TODO: use pipes instead of CombinedOutput so that we can show the output of commands more interactively, instead
 	// of now, which is after they're completely done executing.
-	output, err := session.CombinedOutput(cmd)
+	output, err := config.executeCommand(session, cmd, sudo)
 	soutput := strings.Replace(string(output), "\r\n", "\n", -1)
 	if err != nil {
 		if config.DisplayOutput == true && len(soutput) > 0 {
@@ -171,6 +175,131 @@ func (config *Config) doRun(cmd string, sudo bool) (string, error) {
 		fmt.Printf("%s", soutput)
 	}
 	return soutput, nil
+}
+
+type singleWriterReader struct {
+	b         *bytes.Buffer
+	b2        *bytes.Buffer
+	teeReader io.Reader
+	mu        sync.Mutex
+	usingRead bool
+}
+
+func newSingleWriterReader() singleWriterReader {
+	b := bytes.NewBuffer([]byte{})
+	b2 := bytes.NewBuffer([]byte{})
+	return singleWriterReader{b, b2, io.TeeReader(b, b2), sync.Mutex{}, false}
+}
+
+func (w *singleWriterReader) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
+}
+
+func (w *singleWriterReader) Read(p []byte) (int, error) {
+	w.usingRead = true
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.teeReader.Read(p)
+	return n, err
+}
+
+// Note: This should only be read once at the end, after everything has
+// be written or read.
+func (w *singleWriterReader) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return append(w.b2.Bytes(), w.b.Bytes()...)
+}
+
+func (config *Config) executeCommand(s *ssh.Session, cmd string, sudo bool) ([]byte, error) {
+	if s.Stdout != nil {
+		return nil, errors.New("ssh: Stdout already set")
+	}
+	if s.Stderr != nil {
+		return nil, errors.New("ssh: Stderr already set")
+	}
+
+	b := newSingleWriterReader()
+	s.Stdout = &b
+	s.Stderr = &b
+	done := make(chan bool)
+
+	if sudo {
+		stdInWriter, err := s.StdinPipe()
+		if err != nil {
+			if config.AbortOnError == true {
+				log.Fatalf("%s", err)
+			}
+			return nil, err
+		}
+
+		go config.injectSudoPasswordIfNecessary(done, &b, stdInWriter)
+	}
+
+	err := s.Run(cmd)
+	close(done)
+	return b.Bytes(), err
+}
+
+func (config *Config) injectSudoPasswordIfNecessary(done <-chan bool, stdOutReader io.Reader, stdInWriter io.Writer) error {
+	matchFound := false
+	sudoMatcher := newSudoMatcher(config.User)
+	for matchFound == false {
+		select {
+		case <-done:
+		default:
+			bytesRead := make([]byte, sudoMatcher.totalMatchLength)
+			_, err := stdOutReader.Read(bytesRead)
+			if err == io.EOF {
+				continue
+			}
+
+			if err != nil {
+				return err
+			}
+			matchFound = sudoMatcher.Match(bytesRead)
+			if matchFound {
+				stdInWriter.Write([]byte(config.Password + "\n"))
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+type sudoMatcher struct {
+	currentIndexMatch int
+	currentPrompt     string
+	stringToFind      string
+	totalMatchLength  int
+}
+
+func newSudoMatcher(user string) sudoMatcher {
+	stringToFind := fmt.Sprintf("[sudo] password for %s:", user)
+	totalMatchLength := len([]byte(stringToFind))
+	return sudoMatcher{0, "", stringToFind, totalMatchLength}
+}
+
+func (m *sudoMatcher) Match(additionalBytes []byte) bool {
+	readString := string(additionalBytes)
+	for _, runeVal := range readString {
+		if runeVal == rune(m.stringToFind[m.currentIndexMatch]) {
+			m.currentPrompt = m.currentPrompt + string(runeVal)
+			m.currentIndexMatch++
+		} else {
+			m.currentPrompt = ""
+			m.currentIndexMatch = 0
+		}
+
+		if len(m.currentPrompt) == m.totalMatchLength {
+			return true
+		}
+	}
+	return false
 }
 
 // Run takes a command and runs it on the remote host, using ssh.
