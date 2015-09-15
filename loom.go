@@ -19,7 +19,7 @@ import (
 	"strings"
 	"sync"
 
-	"code.google.com/p/go.crypto/ssh"
+	"golang.org/x/crypto/ssh"
 )
 
 // Config contains ssh and other configuration data needed for all the public functions in loom.
